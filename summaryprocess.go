@@ -143,6 +143,142 @@ func NewUpdateProcessStat() {
 		fmt.Println("time since= ", timesince)
 	}
 }
+type workloadpersec map[string]workloaddata
+func getWorkLoadsfromConfig() workloadpersec{
+	workloads := GetPidWorkloads()
+		// fmt.Println(workloads)
+	// var wg sync.WaitGroup
+
+	pidlst := []string{}
+	workloaddatamap := make(map[string]workloaddata)
+	for k , v := range workloads {
+		cmdArr := make([]string, 0)
+		mycppuArr := make([]CPUstat, 0)
+		myiocntArr := []IOCounters{}
+		mysmapsArr := 	[]smapsCounter{}
+		mystatusinfoArr := []StatusInfo{}
+
+		pidlst = append(pidlst, v...)
+		for _ , pid := range v {
+			c1 := make(chan string, 1)
+			c2 := make(chan CPUstat, 1)
+			c3 := make(chan IOCounters, 1)
+			c4 := make(chan smapsCounter, 1)
+			c5 := make(chan StatusInfo, 1)
+			
+			go func() {
+				// defer wg.Done()
+				cmdlinetmp , _ := getCommandline(pid)             // command line for each PID
+				c1 <- cmdlinetmp
+			}()
+			// wg.Add(1)
+		
+			
+			go func() {
+				// defer wg.Done()
+				mycpputmp, _ := CPUinfo(pid)                       // cpu-total, user, sys, nice, iowait, guest
+				c2 <- *mycpputmp
+			}()
+			// wg.Add(1)
+
+			go func() {
+				// defer wg.Done()
+				myiocnttmp, _ := getIOCounter(pid)                // readcount, write count, read_byte, write_byte
+				c3 <- *myiocnttmp
+			}()
+			// wg.Add(1)
+
+			go func() {
+				// defer wg.Done()
+				mysmapstmp, _ := getSmaps(pid)                    // rss, pss, shared dirty, private dirty
+				c4 <- *mysmapstmp
+			}()
+			// wg.Add(1)
+
+			go func() {
+				// defer wg.Done()
+				mystatusinfotmp, _ := getStatusInfo(pid)    	 // get StatusInfo
+				c5 <- *mystatusinfotmp
+			}()
+			// wg.Add(1)
+			// wg.Wait()
+
+			cmdlinetmp := <- c1
+			mycpputmp := <- c2
+			myiocnttmp := <- c3
+			mysmapstmp := <- c4
+			mystatusinfotmp := <- c5
+
+			cmdArr = append(cmdArr, cmdlinetmp)
+			mycppuArr = append(mycppuArr, mycpputmp)
+			myiocntArr = append(myiocntArr, myiocnttmp)
+			mysmapsArr = append(mysmapsArr, mysmapstmp)
+			mystatusinfoArr = append(mystatusinfoArr, mystatusinfotmp)
+		}
+
+		// var cmdlines string 
+		// for _ , v := range cmdArr {
+		// 	cmdlines = cmdlines + ", " + v
+		// }
+
+		cmdlines := strings.Join(distinct(cmdArr), ",")
+		sumCPU_total, sumUser, sumSystem, sumNice, sumIowait, sumGuest, sumMinpgflt,sumMajpgflt,sumThreadCnt := 0,0,0,0,0,0,0,0,0
+		
+		for _, v := range mycppuArr {
+			sumCPU_total = sumCPU_total + v.CPU_total
+			sumUser = sumUser + v.User
+			sumSystem = sumSystem + v.System
+			sumNice = sumNice + v.Nice
+			sumIowait = sumIowait + v.Iowait
+			sumGuest = sumGuest + v.Guest
+			sumMinpgflt = sumMinpgflt + v.Minpgflt
+			sumMajpgflt = sumMajpgflt + v.Majpgflt
+			sumThreadCnt = sumThreadCnt + v.ThreadCnt
+		}
+		
+		sumrdcnt, sumwrtcnt, sumrdbytes, sumwrtbytes := 0,0,0,0
+		for _, v := range myiocntArr {
+			sumrdcnt = sumrdcnt + v.rdcnt
+			sumwrtcnt = sumwrtcnt + v.wrtcnt
+			sumrdbytes = sumrdbytes + v.rdbytes
+			sumwrtbytes = sumwrtbytes + v.wrtbytes
+		}
+		
+		sumrss, sumpss, sumsdirty,sumpdirty := 0,0,0,0
+		for _, v := range mysmapsArr {
+			sumrss = sumrss + v.rss
+			sumpss = sumpss + v.pss
+			sumsdirty = sumsdirty + v.sdirty
+			sumpdirty = sumpdirty + v.pdirty
+		}
+		
+		sumVmData,sumVmStk,sumVmLck, sumVmLib,sumVmExe  := 0,0,0,0,0
+		for _, v := range mystatusinfoArr {
+			sumVmData = sumVmData + v.VmData
+			sumVmStk  = sumVmStk + v.VmStk
+			sumVmLck = sumVmLck + v.VmLck
+			sumVmLib = sumVmLib + v.VmLib
+			sumVmExe = sumVmExe + v.VmExe
+		}
+		_ ,ok := workloaddatamap[k]
+			if !ok {
+				var tmp workloaddata
+				var tmpCpu CPUstat
+				var tmpio IOCounters
+				var tmpsmaps smapsCounter
+				var tmpstatusinfo StatusInfo
+
+				tmpCpu = CPUstat{sumCPU_total,sumUser,sumSystem,sumNice,sumIowait,sumGuest,sumMinpgflt,sumMajpgflt,sumThreadCnt}
+				tmpio = IOCounters{sumrdcnt,sumwrtcnt,sumrdbytes,sumwrtbytes}
+				tmpsmaps = smapsCounter{sumrss, sumpss, sumsdirty, sumpdirty}
+				tmpstatusinfo = StatusInfo{sumVmData,sumVmStk,sumVmLck,sumVmLib,sumVmExe}
+				
+				tmp = workloaddata{cmdlines,tmpCpu,tmpio,tmpsmaps,tmpstatusinfo}
+				workloaddatamap[k] = tmp
+			}	
+	}
+return workloaddatamap
+}
 //READ FROM CACHE
 func getProcessSummaryMetricsC(key string, c chan finalprocsum )  {
 	tmp := make(finalprocsum)
